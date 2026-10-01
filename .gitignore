@@ -1,0 +1,10 @@
+node_modules/
+*.tgz
+.pi/
+.env
+.env.*
+!.env.example
+!.env.template
+.DS_Store
+._*
+*.cookie
