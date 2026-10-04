@@ -1,12 +1,12 @@
 {
   "name": "pi-usage",
-  "version": "0.1.0",
+  "version": "0.0.2",
   "private": true,
   "type": "module",
   "description": "Compact provider-aware subscription quota status for Pi",
   "keywords": ["pi-package"],
   "pi": { "extensions": ["./extensions/usage/index.ts"] },
-  "files": ["extensions", "src", "README.md"],
+  "files": ["extensions", "src", "README.md", "CHANGELOG.md"],
   "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
   "scripts": { "test": "node --test test/*.test.ts", "pack:check": "npm pack --dry-run --ignore-scripts" }
 }

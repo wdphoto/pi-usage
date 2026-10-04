@@ -1,32 +1,68 @@
 # pi-usage
 
-Persistent cloud subscription quota status for Pi, independent of the selected model:
+Cloud subscription quota status for Pi, following the selected provider:
 
 ```text
-GPT: ■■□□□ 40% ↻7d | Ollama: ■□□□□ 15% ↻12d
+GPT: 27% ↻5h · 27% ↻6d
 ```
 
-Five squares show used quota, rounded to the nearest 20%. Filled squares
-change color at the thresholds below; empty squares remain dim.
-Each provider stays in the standard left-aligned footer status row, including
-while using local models. Percentages show **used** quota; reset days round up.
-Exact values and reset timestamps remain in `/usage`. Low usage is dim grey,
-with accent at 70%, warning at 80%, and critical at 90%. At 90% it also warns
-once per known account/reset period. Colors use unrounded percentages.
-The host may truncate the status row in narrow terminals.
+For Ollama Cloud instead:
 
-Uses `setStatus`, not `setFooter`, so other extension statuses remain intact.
+```text
+OLM: 06% ↻29d
+```
+
+GPT shows the 5-hour allowance first, then the weekly allowance. OLM shows
+Ollama's monthly allowance. Percentages are padded to at least two digits.
+There is one layout; `/usage footer` toggles its visibility without stopping
+polling or critical notifications. Usage appears in Pi's standard footer
+status row alongside other extension statuses. GPT appears for `openai` or
+`openai-codex`; OLM appears for `ollama-cloud`, or `ollama` models whose IDs
+end in `:cloud` or `-cloud`. Local Ollama models, other providers, and no
+selected model show no usage status. Percentages show **used** quota.
+Only percentages change color; labels and countdowns remain dim.
+
+| Window | Accent / watch | Warning / caution | Error / critical |
+| --- | --- | --- | --- |
+| GPT 5h | 80% | 90% | 100% |
+| GPT weekly | 70% | 85% | 95% |
+| Ollama monthly | 70% | 85% | 95% |
+
+These are UI heuristics, not provider-defined limits or time-aware spending
+forecasts. Colors use unrounded percentages; displayed percentages round to
+whole numbers, so a rounded percentage can appear to reach a threshold before
+its color changes. Critical usage warns once per known account/window/reset
+period when a future reset timestamp is available.
+Reset days round up; the 5h countdown uses rounded-up hours, or minutes within
+one hour. Percentages to one decimal place and full reset timestamps remain
+in `/usage`.
+Pi may truncate the shared status row in narrow terminals.
+
+Uses `setStatus`, not a widget or `setFooter`, so Pi's default footer and other
+extension statuses remain intact.
+
+## Scope and versioning
+
+This package tracks subscription quotas only. It does not include pi-tokometer
+code, token counting, inference-cost tracking, or a replacement footer.
+
+The current development version is **v0.0.2**. `package.json` is the version
+source of truth; changes are tracked in [CHANGELOG.md](CHANGELOG.md). While
+experimental, versioned checkpoints increment the patch number (`0.0.x`).
+Versioning does not imply npm publication; the package remains private.
 
 ## Provider support
 
 | Priority | Provider | Current implementation |
 | --- | --- | --- |
-| 1 | ChatGPT / OpenAI Codex | Weekly Codex quota via Pi's `openai` ChatGPT OAuth, with legacy `openai-codex` fallback |
+| 1 | ChatGPT / OpenAI Codex | 5h and weekly Codex quotas via Pi's `openai` ChatGPT OAuth, with legacy `openai-codex` fallback |
 | 2 | Ollama Cloud | Monthly included credits via an explicitly supplied website cookie file |
 
 ChatGPT here means **Codex subscription usage**, not every model's ChatGPT web
-chat allowance. Weekly windows are identified by duration, not guessed from
-field order. Accounts that return no weekly window show unavailable.
+chat allowance. The 5h and weekly windows are identified by duration (18,000
+and 604,800 seconds), not guessed from field order. Missing or invalid windows
+show unavailable independently; a valid window is preserved if the other is
+missing or malformed.
 
 Both implemented adapters are checked regardless of the selected model.
 Each snapshot belongs to its authenticated provider account, not the active
@@ -45,14 +81,17 @@ not clear snapshots or trigger extra requests.
 
 ## Install
 
-Requires Pi 0.85.1-compatible extension APIs and a modern Node runtime.
+Requires Pi 0.85.1-compatible extension APIs. For the development commands
+below, use Node.js 22.18+ or a newer release with TypeScript type stripping
+enabled by default.
 
 ```sh
-pi install /absolute/path/to/agent-stuff/pi-usage
+pi install git:github.com/wdphoto/pi-usage
 ```
 
-Then run `/reload` in each existing Pi session. Both providers are polled in UI
-sessions even when neither is selected. No inference is performed.
+Then run `/reload` in each existing Pi session. Both providers are polled in UI sessions even when neither is
+selected. No inference is performed. See [Authentication](#authentication)
+for setup; without usable credentials, the affected provider shows unavailable.
 
 ## Authentication
 
@@ -77,8 +116,9 @@ transport are mock-tested, but acceptance of that grant by the private
 (HTTP 401/403) now reports possible token-scope incompatibility instead of
 instructing you to sign in again. This is not proof that inference auth is
 broken. Pi itself links new-login usage-limit errors to
-https://chatgpt.com/settings/usage. The existing Codex weekly parser has not
-been validated against the new subscription-sharing allowance.
+https://chatgpt.com/settings/usage. The 5h and weekly window parsers are
+mock-tested, but have not been live-validated by this package against the new
+subscription-sharing allowance.
 
 OpenAI's documented [Usage and Costs APIs](https://developers.openai.com/cookbook/examples/completions_usage_api)
 report organization API activity using an Admin API key. They are not a verified
@@ -106,25 +146,29 @@ the private file. The extension does not extract cookies from browsers or
 Keychain. Renew the file if the website session expires. No credential value is
 logged, saved in session messages, or copied into this package.
 
-If cookie setup is not desired, Ollama shows `unavailable` until another verified account
-authentication method is implemented. Do not mistake that for working live
+If cookie setup is not desired, Ollama shows `unavailable` until another
+verified account authentication method is implemented. Do not mistake that for working live
 monthly quota tracking.
 
 ## Commands
 
-- `/usage`: all providers' quotas or diagnostic statuses, exact percentages,
+- `/usage`: all providers' valid quotas or diagnostic statuses, percentages
+  to one decimal place,
   used/allowed credits where available, reset timestamps, and last refresh.
 - `/usage refresh`: explicitly refresh both implemented adapters.
-- `/usage toggle`: toggle the footer and background polling together.
-- `/usage on` / `/usage off`: explicitly enable or disable. Off cancels pending
-  requests and clears cached snapshots; on fetches fresh quotas. While off,
-  `/usage` and `/usage refresh` do not fetch.
-  This is runtime-only: reload or session replacement restores the default (on).
-  Use Pi `/config` to disable the extension persistently.
-- `/ollama-usage`: compatibility alias; also shows all providers.
+- `/usage footer`: toggle the footer readout shown/hidden. No arguments or
+  view modes. This does not fetch, clear snapshots, or change polling;
+  `/usage` and `/usage refresh` still work while hidden. Visibility is
+  runtime-only; reload or session replacement restores shown.
+- `/ollama-usage`: compatibility alias; accepts the same arguments and shows
+  all providers.
 
-Detail output is UI-only, not injected into LLM context. Per-model request-count
-breakdowns and additional quota windows are deferred; they are not parsed yet.
+Use Pi `/config` to disable the extension persistently, including polling.
+The former `view`, `toggle`, `on`, and `off` subcommands are no longer supported.
+
+Detail output is UI-only, not injected into LLM context. It includes every
+valid GPT window returned. Per-model request-count breakdowns and quota
+windows other than GPT 5h/weekly and Ollama monthly are not parsed yet.
 
 ## Refresh and safety
 
@@ -149,16 +193,23 @@ breakdowns and additional quota windows are deferred; they are not parsed yet.
 ```sh
 npm test
 npm run pack:check
+git diff --check
 ```
 
 Tests use invented data and mocked transport, including persistent multi-provider
-status, failure isolation, refresh throttling, provider switching,
-weekly-window selection, monthly-credit parsing, thresholds, reset dates,
+snapshots, selected-provider footer status, failure isolation, refresh throttling, provider switching,
+5h/weekly-window selection in either field order, monthly-credit parsing,
+period-specific thresholds, reset dates, zero-padded readouts, footer toggling
+without stopping refreshes, removed-command rejection,
 invalid data, cookie permissions, redirects, bounded responses, shutdown,
 current ChatGPT OAuth selection, API-key exclusion, legacy fallback, and
 no account fallback after modern authentication failures.
-No dependency download or live provider call is required for these tests on
-Node versions supporting TypeScript type stripping.
+No dependency download or live provider call is required. Cookie tests use
+invented owner-only files in temporary directories, never your real cookie.
+`pack:check` inspects the package contents without publishing.
+
+For contributors, the checkout's `AGENTS.md` contains development guidance
+and safety requirements; it is not included in the installable package.
 
 ## Evidence
 
@@ -172,5 +223,5 @@ Interface discovery (independent implementation, no upstream code copied):
   — monthly-credit text and `data-time` reset timestamp.
 - [Ollama pricing](https://ollama.com/pricing) and
   [authentication documentation](https://docs.ollama.com/api/authentication).
-- [Visual inspiration](https://github.com/satas20/opencode-todo-progress)
-  — original shaded-cell inspiration; now uses filled/empty small squares.
+- [Historical visual inspiration](https://github.com/satas20/opencode-todo-progress)
+  — informed an earlier bar-based layout; the current usage line uses digits only.

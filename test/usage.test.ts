@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, rm, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import extension from "../extensions/usage/index.ts";
-import { footer, colorFor, parseChatGPT, parseOllama, providerFor, formatDate, statusSummary } from "../src/quota.ts";
+import { footer, colorFor, parseChatGPT, parseChatGPTWindows, parseOllama, providerFor, formatDate, statusSummary } from "../src/quota.ts";
 import { boundedText, loadQuota, readCookie, URLS } from "../src/sources.ts";
 
 const now = Date.parse("2030-09-01T12:00:00Z");
@@ -14,7 +14,10 @@ const html = `<h2>Monthly usage</h2><p>$12.00 of $80 used</p><span data-time="20
 
 test("routes quota by provider, never by OpenAI model name alone", () => {
   assert.equal(providerFor({ provider: "openai-codex", id: "anything" }), "chatgpt");
-  assert.equal(providerFor({ provider: "openai", id: "gpt-5" }), undefined);
+  assert.equal(providerFor({ provider: "openai", id: "gpt-5" }), "chatgpt");
+  assert.equal(providerFor({ provider: "ollama-cloud", id: "example" }), "ollama");
+  assert.equal(providerFor({ provider: "ollama", id: "example-cloud" }), "ollama");
+  assert.equal(providerFor(), undefined);
   assert.equal(providerFor({ provider: "ollama", id: "example:cloud" }), "ollama");
   assert.equal(providerFor({ provider: "ollama", id: "local:8b" }), undefined);
   assert.equal(providerFor({ provider: "opencode", id: "example" }), undefined);
@@ -36,17 +39,17 @@ test("Ollama parses actual monthly credits and exact reset; no date invention", 
   assert.throws(() => parseOllama("Monthly usage $1 of $0 used"));
   assert.throws(() => parseOllama("Monthly usage Models used this month $1 of $10 used"));
 });
-test("compact shaded bar, dates, thresholds, overage, unknown and expired", () => {
+test("digits, dates, thresholds, overage, unknown and expired", () => {
   const q = parseChatGPT(payload, now);
   const plain = (_c: string, s: string) => s;
-  assert.equal(footer(q, plain, false, now), "CG ■■□□□ 40% ↻30d");
+  assert.equal(footer(q, plain, false, now), "CG 40% ↻30d");
   assert.equal(footer(undefined, plain, false, now), "?");
-  assert.equal(footer({ ...q, resetAt: now + 3600000 }, plain, false, now), "CG ■■□□□ 40% ↻1d");
-  assert.equal(footer({ ...q, provider: "ollama", resetAt: undefined }, plain, false, now), "🦙 ■■□□□ 40%");
+  assert.equal(footer({ ...q, resetAt: now + 3600000 }, plain, false, now), "CG 40% ↻1d");
+  assert.equal(footer({ ...q, provider: "ollama", resetAt: undefined }, plain, false, now), "🦙 40%");
   assert.equal(footer({ ...q, resetAt: now }, plain, false, now), "?");
-  assert.equal(footer({ ...q, percent: 120 }, plain, false, now), "CG ■■■■■ 120% ↻30d");
-  assert.equal(footer(q, plain, true, now), "CG ■■□□□ ~40% ↻30d");
-  assert.deepEqual([0, 69.9, 70, 79.9, 80, 89.9, 90, 120].map(colorFor), ["dim", "dim", "accent", "accent", "warning", "warning", "error", "error"]);
+  assert.equal(footer({ ...q, percent: 120 }, plain, false, now), "CG 120% ↻30d");
+  assert.equal(footer(q, plain, true, now), "CG ~40% ↻30d");
+  assert.deepEqual([0, 69.9, 70, 84.9, 85, 94.9, 95, 120].map(p => colorFor(p)), ["dim", "dim", "accent", "accent", "warning", "warning", "error", "error"]);
 });
 test("transport uses only fixed ChatGPT URL, selected auth, and disables redirects", async () => {
   const ctx = { modelRegistry: { async getProviderAuth(id: string) { if (id === "openai") return undefined; assert.equal(id, "openai-codex"); return { auth: { apiKey: "invented-token", headers: { "ChatGPT-Account-Id": "invented-account" } } }; } } };
@@ -147,12 +150,15 @@ test("model switches retain status and shutdown prevents late updates", async ()
   extension({ on: (n: string, fn: Function) => handlers.set(n, fn), registerCommand: (n: string, c: any) => commands.set(n, c) } as any);
   const statuses: (string | undefined)[] = [];
   let resolveAuth: Function;
-  const ctx: any = { hasUI: true, model: { provider: "openai-codex", id: "test" }, ui: { setStatus: (_k: string, s: string) => statuses.push(s), theme: { fg: (_c: string, s: string) => s }, notify: () => {} }, modelRegistry: { getProviderAuth: () => new Promise(r => { resolveAuth = r; }) } };
+  const ctx: any = { hasUI: true, model: { provider: "openai-codex", id: "test" }, ui: { setStatus: (key: string, status: string | undefined) => { assert.equal(key, "pi-usage"); statuses.push(status); }, setWidget() { assert.fail("usage must use the standard footer status row"); }, setFooter() { assert.fail("usage must not replace Pi's footer"); }, theme: { fg: (_c: string, s: string) => s }, notify: () => {} }, modelRegistry: { getProviderAuth: () => new Promise(r => { resolveAuth = r; }) } };
   handlers.get("session_start")!({}, ctx);
-  assert.equal(statuses.at(-1), "GPT: loading | Ollama: loading");
+  assert.equal(statuses.at(-1), "GPT: loading");
   ctx.model = { provider: "openai", id: "test" };
   handlers.get("model_select")!({}, ctx);
-  assert.equal(statuses.at(-1), "GPT: loading | Ollama: loading");
+  assert.equal(statuses.at(-1), "GPT: loading");
+  ctx.model = undefined;
+  handlers.get("model_select")!({}, ctx);
+  assert.equal(statuses.at(-1), undefined);
   handlers.get("session_shutdown")!({}, ctx);
   const count = statuses.length;
   resolveAuth!({ auth: { apiKey: "invented" } });
@@ -169,9 +175,9 @@ test("model switches retain status and shutdown prevents late updates", async ()
 test("consolidated status distinguishes missing, expired and stale quotas", () => {
   const plain = (_c: string, s: string) => s;
   assert.equal(statusSummary({ chatgpt: {}, ollama: { error: "private details" } }, plain, now),
-    "GPT: pending | Ollama: unavailable");
+    "GPT: pending | OLM: unavailable");
   assert.equal(statusSummary({ chatgpt: { quota: parseChatGPT(payload, now - 31 * 60000) }, ollama: { quota: { ...parseOllama(html, now), resetAt: now } } }, plain, now),
-    "GPT: ■■□□□ ~40% ↻30d | Ollama: expired");
+    "GPT: unavailable · ~40% ↻30d | OLM: expired");
 });
 
 test("non-UI sessions do not resolve credentials or render statuses", () => {

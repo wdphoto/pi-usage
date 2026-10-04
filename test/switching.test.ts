@@ -27,8 +27,14 @@ test("all quotas persist across model switches; refresh isolates provider failur
   }) as typeof fetch;
   const events = new Map<string, Function>();
   const statuses: (string | undefined)[] = [];
+  const notifications: string[] = [];
   const ctx: any = { hasUI: true, model: { provider: "openai-codex", id: "test" },
-    ui: { setStatus: (_k: string, s: string) => statuses.push(s), theme: { fg: (_c: string, s: string) => s }, notify() {} },
+    ui: { setStatus: (key: string, status: string | undefined) => {
+        assert.equal(key, "pi-usage");
+        statuses.push(status);
+      },
+      setWidget() { assert.fail("usage must use the standard footer status row"); },
+      setFooter() { assert.fail("usage must not replace Pi's footer"); }, theme: { fg: (_c: string, s: string) => s }, notify(message: string) { notifications.push(message); } },
     modelRegistry: { async getProviderAuth() { return { auth: { apiKey: "invented" } }; } } };
   const commands = new Map<string, any>();
   extension({ on: (n: string, h: Function) => events.set(n, h), registerCommand: (n: string, c: any) => commands.set(n, c) } as any);
@@ -37,37 +43,57 @@ test("all quotas persist across model switches; refresh isolates provider failur
     assert.doesNotMatch(statuses.at(-1)!, /loading|pending/);
   };
   try {
-    events.get("session_start")!({}, ctx); await settled();
-    const expected = "GPT: ■■□□□ 40% ↻7d | Ollama: ■□□□□ 15% ↻7d";
+    events.get("session_start")!({}, ctx);
+    await commands.get("usage").handler("", ctx);
+    await settled();
+    const expected = "GPT: unavailable · 40% ↻7d";
     assert.equal(statuses.at(-1), expected);
-    for (const model of [{ provider: "ollama", id: "example:cloud" }, { provider: "ollama", id: "local:8b" }, { provider: "opencode", id: "test" }, { provider: "openai-codex", id: "test" }]) {
+    for (const [model, status] of [
+      [{ provider: "ollama-cloud", id: "example" }, "OLM: 15% ↻7d"],
+      [{ provider: "ollama", id: "example:cloud" }, "OLM: 15% ↻7d"],
+      [{ provider: "ollama", id: "local:8b" }, undefined],
+      [{ provider: "opencode", id: "test" }, undefined],
+      [{ provider: "openai", id: "test" }, expected],
+      [{ provider: "openai-codex", id: "test" }, expected],
+    ] as const) {
       ctx.model = model;
       events.get("model_select")!({}, ctx);
-      assert.equal(statuses.at(-1), expected);
+      assert.equal(statuses.at(-1), status);
     }
     assert.equal(calls.length, 2);
     await commands.get("usage").handler("", ctx);
+    assert.match(notifications.at(-1)!, /ChatGPT \/ Codex/);
+    assert.match(notifications.at(-1)!, /Ollama monthly/);
     assert.equal(calls.length, 2);
-    await commands.get("usage").handler("off", ctx);
+    await commands.get("usage").handler("footer", ctx);
     assert.equal(statuses.at(-1), undefined);
+    await commands.get("usage").handler("", ctx);
+    assert.equal(calls.length, 2);
     events.get("model_select")!({}, ctx);
     events.get("agent_settled")!({}, ctx);
-    await commands.get("usage").handler("refresh", ctx);
-    await commands.get("usage").handler("off", ctx);
     assert.equal(statuses.at(-1), undefined);
-    assert.equal(calls.length, 2);
-    await commands.get("usage").handler("toggle", ctx);
-    await settled();
+    await commands.get("usage").handler("refresh", ctx);
+    assert.equal(statuses.at(-1), undefined);
+    assert.equal(calls.length, 4);
+    await commands.get("usage").handler("footer", ctx);
     assert.equal(statuses.at(-1), expected);
     assert.equal(calls.length, 4);
-    await commands.get("usage").handler("on", ctx);
-    assert.equal(calls.length, 4);
+    for (const removed of ["view", "view full", "footer on", "toggle", "on", "off"]) {
+      await commands.get("usage").handler(removed, ctx);
+      assert.equal(statuses.at(-1), expected);
+      assert.equal(calls.length, 4);
+    }
     failGPT = true;
     await commands.get("usage").handler("refresh", ctx);
     assert.equal(calls.length, 6);
-    assert.equal(statuses.at(-1), "GPT: unavailable | Ollama: ■□□□□ 15% ↻7d");
+    assert.equal(statuses.at(-1), "GPT: unavailable");
+    ctx.model = { provider: "ollama-cloud", id: "example" };
+    events.get("model_select")!({}, ctx);
+    assert.equal(statuses.at(-1), "OLM: 15% ↻7d");
+    assert.equal(calls.length, 6);
   } finally {
     events.get("session_shutdown")!({}, ctx);
+    assert.equal(statuses.at(-1), undefined);
     globalThis.fetch = originalFetch;
     if (previousEnv === undefined) delete process.env.PI_USAGE_OLLAMA_COOKIE_FILE;
     else process.env.PI_USAGE_OLLAMA_COOKIE_FILE = previousEnv;

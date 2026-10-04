@@ -2,7 +2,7 @@ import { open } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { parseChatGPT, parseOllama, UsageError, type Provider, type Quota } from "./quota.ts";
+import { parseChatGPTWindows, parseOllama, UsageError, type Provider, type Quota } from "./quota.ts";
 
 export const URLS = {
   chatgpt: "https://chatgpt.com/backend-api/wham/usage",
@@ -53,7 +53,7 @@ function accountFromJWT(token: string): string | undefined {
   } catch { return undefined; }
 }
 export async function loadQuota(provider: Provider, ctx: SourceContext, signal: AbortSignal,
-  fetcher: typeof fetch = fetch): Promise<{ quota: Quota; identity: string }> {
+  fetcher: typeof fetch = fetch): Promise<{ quota: Quota; quotas: Quota[]; identity: string }> {
   const headers: Record<string, string> = { Accept: provider === "chatgpt" ? "application/json" : "text/html" };
   let identity: string;
   let modernChatGPT = false;
@@ -91,11 +91,12 @@ export async function loadQuota(provider: Provider, ctx: SourceContext, signal: 
     throw new UsageError("ChatGPT quota endpoint rejected Pi's new OpenAI OAuth token. This may be a token-scope incompatibility, not an expired login. Check https://chatgpt.com/settings/usage; new-login quota tracking is not yet verified.");
   }
   const text = await boundedText(response);
-  let quota: Quota;
+  let quotas: Quota[];
   if (provider === "chatgpt") {
     let data: unknown;
     try { data = JSON.parse(text); } catch { throw new UsageError("ChatGPT quota response was not JSON."); }
-    quota = parseChatGPT(data);
-  } else quota = parseOllama(text);
-  return { quota, identity: createHash("sha256").update(provider + identity).digest("hex") };
+    quotas = parseChatGPTWindows(data);
+  } else quotas = [parseOllama(text)];
+  const quota = quotas.find(q => q.period === "weekly") ?? quotas[0];
+  return { quota, quotas, identity: createHash("sha256").update(provider + identity).digest("hex") };
 }
