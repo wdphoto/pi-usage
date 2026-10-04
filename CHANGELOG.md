@@ -3,7 +3,17 @@
 `package.json` is the version source of truth. Experimental checkpoints use
 `0.0.x` patch versions; the package remains private and locally installed.
 
-## Unreleased
+## 0.0.3 — 2026-10-03
+
+- GPT 5h and Ollama monthly quotas gain a projected pace marker (`▲`):
+  `accent` when the current rate would exceed the allowance before reset,
+  `warning` above 150% projected. Linear extrapolation from the last
+  observation; monthly uses the calendar month before reset; `/usage` adds the
+  projection.
+- Model switches cut the active provider's footer to the theme foreground,
+  then fade to normal over one second. Warning/error percentages remain steady;
+  animation frames reuse cached snapshots and never trigger requests.
+- Short-window reset countdown transitions from `1h` to `59m`, never `60m`.
 
 ## 0.0.2 — 2026-10-03
 

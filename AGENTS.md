@@ -8,9 +8,9 @@ token counting, and inference-cost tracking out of this package. It has its own 
 repository even when nested in another workspace. Run Git and validation
 commands here; do not stage its files in the parent repository.
 
-The package is currently private and installed from a local checkout. Do not
-publish, change release metadata, or mutate remote repositories without an
-explicit request. Preserve unrelated working-tree changes.
+The npm package remains private; installation supports GitHub and local
+checkouts. Do not publish, change release metadata, or mutate remote repositories
+without an explicit request. Preserve unrelated working-tree changes.
 
 ## Layout
 
@@ -38,6 +38,38 @@ version entry when making a checkpoint. Run all validation before a checkpoint.
 Do not automatically bump the version for every edit, create Git tags, publish,
 or mutate remotes without an explicit request.
 
+## Release shorthand
+
+When the user directly instructs **"ship it"**, treat it as
+explicit authorization for the following workflow in this repository. Merely
+quoting or discussing the phrase is not authorization.
+
+1. Review the working tree and diff. Include the intended pi-usage changes;
+   preserve unrelated work and ask if release scope is ambiguous. Check the
+   branch and remote; do not force-push or discard changes.
+2. Increment the experimental patch version (`0.0.x`) unless the user specifies
+   another version. Align `package.json`, README, and CHANGELOG; move Unreleased
+   notes into a dated entry for the new version.
+3. Run `npm test`, `npm run pack:check`, and `git diff --check`. Stop on failure.
+   Keep tests offline; this instruction does not authorize live quota checks.
+4. Commit the release changes, create an annotated `v<version>` Git tag at that
+   commit, and push the branch and that specific tag to the verified GitHub
+   remote. Never move or overwrite an existing release tag.
+5. Create a GitHub Release for that tag using the version's changelog notes
+   (prefer `gh release create` with `--verify-tag`). Do not publish to npm.
+   If GitHub authentication or permissions are unavailable, report the blocker;
+   do not read or print credentials. Report partial completion rather than
+   claiming a release succeeded.
+6. Report version, commit, tag, release URL, validation, and final working-tree
+   status. Do not automatically run package updates on users' installations.
+
+Git tags identify immutable version checkpoints; GitHub Releases attach notes
+to those tags. Pi does not select versions from GitHub Releases. Unpinned GitHub
+installs follow the default branch when updated with `pi update <source>` or
+`pi update --extensions`; tag/commit-pinned installs remain pinned. Users reload
+existing sessions after updating. Local-path installs load their checkout and
+require updating that checkout separately, then reloading.
+
 ## Behavior to preserve
 
 - Poll both implemented providers independently of the selected model; model
@@ -45,10 +77,20 @@ or mutate remotes without an explicit request.
 - GPT parses 5h and weekly windows by duration (18,000 and 604,800 seconds),
   never field position. One malformed window must not hide another valid one.
 - Ollama parses monthly included credits, not top-ups or model prices.
-- The single usage-line layout is `GPT: 27% ↻5h · 27% ↻6d | OLM: 06% ↻29d`:
-  GPT 5h first, weekly second, then Ollama monthly. Show used percentages,
-  padded to at least two digits. Color percentages using unrounded values;
-  labels and reset countdowns remain dim. No progress bars or view modes.
+- Footer follows provider selection: GPT for `openai`/`openai-codex`, OLM for
+  `ollama-cloud` or `ollama` IDs ending in `:cloud`/`-cloud`, hidden otherwise.
+  GPT shows `GPT: 27% ↻5h · 27% ↻6d` (5h then weekly); Ollama shows
+  `OLM: 06% ↻29d` (monthly). Show used percentages padded to at least two digits.
+  Color percentages using unrounded values; labels and reset countdowns remain
+  dim at rest. On model switch, cut to theme foreground then fade to normal;
+  warning/error digits stay unchanged. Animation never fetches. Short-window
+  countdowns go from `1h` directly to `59m`, never `60m`. GPT 5h and Ollama
+  monthly windows also show a pace marker (`▲`) derived only from observed
+  percentage and elapsed window time: `accent` when projected above 100%
+  before reset, `warning` above 150%, hidden during the first 5% of a window
+  and after reset. The monthly window is the calendar month before its reset
+  date. Never present pace as provider policy or a real forecast. No bars or
+  view modes.
 - `/usage` shows details, `/usage refresh` explicitly refreshes, and
   `/usage footer` only toggles visibility. Hiding does not stop polling,
   suppress critical notifications, clear snapshots, or block detail commands.

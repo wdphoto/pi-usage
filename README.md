@@ -20,7 +20,25 @@ status row alongside other extension statuses. GPT appears for `openai` or
 `openai-codex`; OLM appears for `ollama-cloud`, or `ollama` models whose IDs
 end in `:cloud` or `-cloud`. Local Ollama models, other providers, and no
 selected model show no usage status. Percentages show **used** quota.
-Only percentages change color; labels and countdowns remain dim.
+Only percentages and pace markers change color; labels and countdowns remain
+dim.
+
+A projected-pace marker (`▲`) follows the GPT 5h and Ollama monthly
+percentages: `accent` when the observed rate would exceed the allowance before
+reset (warm), and `warning` above 150% projected (hot). Projections start after
+the first 5% of a window (15 minutes for 5h, about 1.5 days for Ollama's
+monthly window) and stop after reset. The monthly window is the calendar month
+before the reset date. The projection is a linear extrapolation from the last
+observed percentage—not a provider forecast—so stale data is marked `~` and the
+marker reflects that observation. Weekly quotas have no pace marker. `/usage`
+adds the projected percentage when it applies.
+
+Switching models cuts the active provider's status to the theme's foreground
+(white in dark themes), holds briefly, then fades smoothly to its normal colors
+within one second. Warning and critical percentages stay unchanged throughout;
+there is no blinking or ongoing pulse. Fade frames repaint cached snapshots
+only: no request, credential resolution, or context change. Hidden footers,
+local or unrelated models, and shutdown stop the animation.
 
 | Window | Accent / watch | Warning / caution | Error / critical |
 | --- | --- | --- | --- |
@@ -32,9 +50,10 @@ These are UI heuristics, not provider-defined limits or time-aware spending
 forecasts. Colors use unrounded percentages; displayed percentages round to
 whole numbers, so a rounded percentage can appear to reach a threshold before
 its color changes. Critical usage warns once per known account/window/reset
-period when a future reset timestamp is available.
-Reset days round up; the 5h countdown uses rounded-up hours, or minutes within
-one hour. Percentages to one decimal place and full reset timestamps remain
+period when a future reset timestamp is available. The pace marker is an
+estimate, not provider policy.
+Reset days round up; the 5h countdown uses rounded-up hours, switching directly
+from `1h` to `59m` when rounded-up minutes reach 59 (never `60m`). Percentages to one decimal place and full reset timestamps remain
 in `/usage`.
 Pi may truncate the shared status row in narrow terminals.
 
@@ -46,7 +65,7 @@ extension statuses remain intact.
 This package tracks subscription quotas only. It does not include pi-tokometer
 code, token counting, inference-cost tracking, or a replacement footer.
 
-The current development version is **v0.0.2**. `package.json` is the version
+The current development version is **v0.0.3**. `package.json` is the version
 source of truth; changes are tracked in [CHANGELOG.md](CHANGELOG.md). While
 experimental, versioned checkpoints increment the patch number (`0.0.x`).
 Versioning does not imply npm publication; the package remains private.
@@ -167,7 +186,8 @@ Use Pi `/config` to disable the extension persistently, including polling.
 The former `view`, `toggle`, `on`, and `off` subcommands are no longer supported.
 
 Detail output is UI-only, not injected into LLM context. It includes every
-valid GPT window returned. Per-model request-count breakdowns and quota
+valid GPT window returned, plus the pace projection when a 5h or monthly
+window has enough history. Per-model request-count breakdowns and quota
 windows other than GPT 5h/weekly and Ollama monthly are not parsed yet.
 
 ## Refresh and safety
@@ -197,14 +217,18 @@ git diff --check
 ```
 
 Tests use invented data and mocked transport, including persistent multi-provider
-snapshots, selected-provider footer status, failure isolation, refresh throttling, provider switching,
+snapshots, selected-provider footer status, switch fade settling and steady
+warning digits, failure isolation, refresh throttling, provider switching,
 5h/weekly-window selection in either field order, monthly-credit parsing,
-period-specific thresholds, reset dates, zero-padded readouts, footer toggling
+period-specific thresholds, reset dates, zero-padded readouts, 5h and monthly
+pace projection and marker colors, footer toggling
 without stopping refreshes, removed-command rejection,
 invalid data, cookie permissions, redirects, bounded responses, shutdown,
 current ChatGPT OAuth selection, API-key exclusion, legacy fallback, and
 no account fallback after modern authentication failures.
-No dependency download or live provider call is required. Cookie tests use
+Tests require the host-provided `@earendil-works/pi-tui` peer to be resolvable
+locally (a link to Pi's installed copy is sufficient); no live provider call
+is required. Cookie tests use
 invented owner-only files in temporary directories, never your real cookie.
 `pack:check` inspects the package contents without publishing.
 

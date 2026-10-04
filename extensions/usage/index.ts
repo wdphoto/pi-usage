@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { mixColors } from "@earendil-works/pi-tui";
 import { mkdir, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -8,12 +9,16 @@ import { loadQuota } from "../../src/sources.ts";
 
 const KEY = "pi-usage";
 const INTERVAL = 15 * 60_000;
+const FADE_DURATION = 1_000;
+const FLASH_HOLD = 100;
 const PROVIDERS: Provider[] = ["chatgpt", "ollama"];
 type State = ProviderState & { checked: number; pending?: AbortController; task?: Promise<void> };
 
 export default function (pi: ExtensionAPI) {
   let current: ExtensionContext | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
+  let pulseTimer: ReturnType<typeof setInterval> | undefined;
+  let pulseUntil = 0;
   let generation = 0;
   let footerVisible = true;
   const states: Record<Provider, State> = { chatgpt: { checked: 0 }, ollama: { checked: 0 } };
@@ -22,9 +27,30 @@ export default function (pi: ExtensionAPI) {
   function paint() {
     if (!current?.hasUI) return;
     const provider = providerFor(current.model);
-    current.ui.setStatus(KEY, footerVisible && provider
-      ? statusSummary(states, (c, s) => current!.ui.theme.fg(c, s), Date.now(), [provider])
-      : undefined);
+    const now = Date.now();
+    const switching = now < pulseUntil;
+    const status = footerVisible && provider
+      ? statusSummary(states, (color, text) => {
+        const concerned = color === "warning" || color === "error";
+        const theme = current!.ui.theme;
+        if (!switching || concerned || !text) return theme.fg(color, text);
+        const elapsed = FADE_DURATION - (pulseUntil - now);
+        const progress = Math.max(0, (elapsed - FLASH_HOLD) / (FADE_DURATION - FLASH_HOLD));
+        return theme.style(text, { fg: mixColors(theme.colors.text, theme.colors[color], progress) });
+      }, now, [provider])
+      : undefined;
+    current.ui.setStatus(KEY, status);
+    // Animation only repaints cached data; it never refreshes or resolves auth.
+    if (status && switching) {
+      if (!pulseTimer) {
+        pulseTimer = setInterval(paint, 50);
+        pulseTimer.unref();
+      }
+    } else {
+      if (pulseTimer) clearInterval(pulseTimer);
+      pulseTimer = undefined;
+      pulseUntil = 0;
+    }
   }
   async function warn(q: Quota, identity: string, ctx: ExtensionContext, epoch: number) {
     if (colorFor(q.percent, q.period) !== "error" || !q.resetAt || q.resetAt <= Date.now()) return;
@@ -104,13 +130,22 @@ export default function (pi: ExtensionAPI) {
     }
     if (timer) clearInterval(timer);
     timer = undefined;
+    if (pulseTimer) clearInterval(pulseTimer);
+    pulseTimer = undefined;
+    pulseUntil = 0;
   }
   pi.on("session_start", (_event, ctx) => {
     if (!ctx.hasUI) return;
     activate(ctx);
     startTimer();
   });
-  pi.on("model_select", (_event, ctx) => activate(ctx));
+  pi.on("model_select", (event, ctx) => {
+    if (!ctx.hasUI) return;
+    if (event.source !== "restore") {
+      pulseUntil = Date.now() + FADE_DURATION;
+    }
+    activate(ctx);
+  });
   pi.on("agent_settled", (_event, ctx) => activate(ctx));
   pi.on("session_shutdown", (_event, ctx) => {
     stop();

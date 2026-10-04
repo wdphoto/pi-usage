@@ -67,6 +67,30 @@ export function parseOllama(html: string, now = Date.now()): Quota {
     observedAt: now, ...(Number.isFinite(reset) ? { resetAt: reset } : {}) };
 }
 export type Color = "dim" | "accent" | "warning" | "error";
+// Pace is a linear extrapolation of the observed rate. The 5h window is fixed;
+// the monthly window is the calendar month before reset. Skip the earliest 5%
+// of a window (15 minutes for 5h) so a single request cannot set the pace.
+const PACE_MIN_FRACTION = 0.05;
+const PACE_HOT = 150;
+export type Pace = { level: "warm" | "hot"; projected: number };
+export function calendarMonthStart(resetAt: number): number {
+  const d = new Date(resetAt);
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - 1);
+  d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+  return d.getTime();
+}
+export function paceFor(q: Quota, now = Date.now()): Pace | undefined {
+  if (q.resetAt === undefined || q.period === "weekly") return undefined;
+  const start = q.period === "5h" ? q.resetAt - 18_000_000 : calendarMonthStart(q.resetAt);
+  const windowMs = q.resetAt - start;
+  const observed = Math.min(q.observedAt, now);
+  if (windowMs <= 0 || observed - start < windowMs * PACE_MIN_FRACTION || observed >= q.resetAt || now >= q.resetAt) return undefined;
+  const projected = q.percent * windowMs / (observed - start);
+  if (projected <= 100) return undefined;
+  return { level: projected > PACE_HOT ? "hot" : "warm", projected };
+}
 export function colorFor(p: number, period: Quota["period"] = "weekly"): Color {
   const [watch, caution, critical] = period === "5h" ? [80, 90, 100] : [70, 85, 95];
   return p >= critical ? "error" : p >= caution ? "warning" : p >= watch ? "accent" : "dim";
@@ -78,7 +102,7 @@ export function formatDate(ms: number): string {
 function readout(q: Quota, fg: (color: Color, text: string) => string, stale: boolean, now: number): string {
   const remaining = q.resetAt === undefined ? undefined : q.resetAt - now;
   const countdown = remaining === undefined ? "" : q.period === "5h"
-    ? remaining <= 3_600_000 ? `${Math.ceil(remaining / 60_000)}m` : `${Math.ceil(remaining / 3_600_000)}h`
+    ? remaining <= 59 * 60_000 ? `${Math.ceil(remaining / 60_000)}m` : `${Math.ceil(remaining / 3_600_000)}h`
     : `${Math.ceil(remaining / 86_400_000)}d`;
   return fg("dim", stale ? "~" : "") + fg(colorFor(q.percent, q.period), `${String(Math.round(q.percent)).padStart(2, "0")}%`) +
     (countdown ? fg("dim", ` ↻${countdown}`) : "");
@@ -98,9 +122,14 @@ export function statusSummary(states: Record<Provider, ProviderState>, fg: (colo
       const render = (window?: Quota) => !window ? fg("dim", "unavailable")
         : window.resetAt !== undefined && window.resetAt <= now ? fg("dim", "expired")
         : readout(window, fg, now - window.observedAt > 30 * 60_000, now);
+      const marker = (window: Quota) => {
+        const pace = paceFor(window, now);
+        return pace ? fg(pace.level === "hot" ? "warning" : "accent", " ▲") : "";
+      };
+      const renderWithMarker = (window?: Quota) => render(window) + (window ? marker(window) : "");
       value = provider === "chatgpt"
-        ? (["5h", "weekly"] as const).map(period => render(windows.find(w => w.period === period))).join(fg("dim", " · "))
-        : render(windows[0]);
+        ? (["5h", "weekly"] as const).map(period => renderWithMarker(windows.find(w => w.period === period))).join(fg("dim", " · "))
+        : renderWithMarker(windows[0]);
     } else {
       value = fg("dim", loading ? "loading" : error ? "unavailable" : q ? "expired" : "pending");
     }
@@ -109,9 +138,11 @@ export function statusSummary(states: Record<Provider, ProviderState>, fg: (colo
   return parts.join(fg("dim", " | "));
 }
 export function details(q: Quota): string {
+  const pace = paceFor(q);
   return [q.provider === "chatgpt" ? `ChatGPT / Codex ${q.period === "5h" ? "5-hour" : "weekly"} quota (not general ChatGPT chat limits)` : "Ollama monthly subscription quota",
     `${q.percent.toFixed(1)}% used; ${Math.max(0, 100 - q.percent).toFixed(1)}% remaining`,
     ...(q.used !== undefined && q.limit !== undefined ? [`$${q.used.toFixed(2)} of $${q.limit.toFixed(2)} used`] : []),
+    ...(pace ? [`Pace: ${pace.level} — projected ${pace.projected.toFixed(1)}% usage by reset at the current rate.`] : []),
     q.resetAt ? `Reset: ${new Date(q.resetAt).toLocaleString()}` : "Reset: unavailable",
     `Checked: ${new Date(q.observedAt).toLocaleString()}`].join("\n");
 }

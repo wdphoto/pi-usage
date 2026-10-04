@@ -34,7 +34,8 @@ test("all quotas persist across model switches; refresh isolates provider failur
         statuses.push(status);
       },
       setWidget() { assert.fail("usage must use the standard footer status row"); },
-      setFooter() { assert.fail("usage must not replace Pi's footer"); }, theme: { fg: (_c: string, s: string) => s }, notify(message: string) { notifications.push(message); } },
+      setFooter() { assert.fail("usage must not replace Pi's footer"); }, theme: { fg: (_c: string, s: string) => s, style: (s: string) => s,
+        colors: { text: { kind: "rgb", r: 255, g: 255, b: 255 }, dim: { kind: "rgb", r: 128, g: 128, b: 128 } } }, notify(message: string) { notifications.push(message); } },
     modelRegistry: { async getProviderAuth() { return { auth: { apiKey: "invented" } }; } } };
   const commands = new Map<string, any>();
   extension({ on: (n: string, h: Function) => events.set(n, h), registerCommand: (n: string, c: any) => commands.set(n, c) } as any);

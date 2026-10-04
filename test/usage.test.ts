@@ -150,7 +150,7 @@ test("model switches retain status and shutdown prevents late updates", async ()
   extension({ on: (n: string, fn: Function) => handlers.set(n, fn), registerCommand: (n: string, c: any) => commands.set(n, c) } as any);
   const statuses: (string | undefined)[] = [];
   let resolveAuth: Function;
-  const ctx: any = { hasUI: true, model: { provider: "openai-codex", id: "test" }, ui: { setStatus: (key: string, status: string | undefined) => { assert.equal(key, "pi-usage"); statuses.push(status); }, setWidget() { assert.fail("usage must use the standard footer status row"); }, setFooter() { assert.fail("usage must not replace Pi's footer"); }, theme: { fg: (_c: string, s: string) => s }, notify: () => {} }, modelRegistry: { getProviderAuth: () => new Promise(r => { resolveAuth = r; }) } };
+  const ctx: any = { hasUI: true, model: { provider: "openai-codex", id: "test" }, ui: { setStatus: (key: string, status: string | undefined) => { assert.equal(key, "pi-usage"); statuses.push(status); }, setWidget() { assert.fail("usage must use the standard footer status row"); }, setFooter() { assert.fail("usage must not replace Pi's footer"); }, theme: { fg: (_c: string, s: string) => s, style: (s: string) => s, colors: { text: { kind: "rgb", r: 255, g: 255, b: 255 }, dim: { kind: "rgb", r: 128, g: 128, b: 128 } } }, notify: () => {} }, modelRegistry: { getProviderAuth: () => new Promise(r => { resolveAuth = r; }) } };
   handlers.get("session_start")!({}, ctx);
   assert.equal(statuses.at(-1), "GPT: loading");
   ctx.model = { provider: "openai", id: "test" };
